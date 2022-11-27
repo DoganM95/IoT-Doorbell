@@ -35,7 +35,7 @@ TaskHandle_t blynkConnectionHandlerThreadFunctionHandle;
 TaskHandle_t ringSensorThreadFunctionHandle;
 
 // Global State
-int isRinging = 0;       // 0 = false, 1 = true
+int isRinging;           // 0 = false, 1 = true
 int autoOpenDoorOnRing;  // 0 = false, 1 = true
 
 // ----------------------------------------------------------------------------
@@ -83,13 +83,15 @@ BLYNK_WRITE(V2) {  // open door, as long as the switch is on
   int pinValue = param.asInt();
   if (pinValue == 0) {
     digitalWrite(openerMosfetGatePin, LOW);
+    Serial.printf("Opening door...");
   } else {
     digitalWrite(openerMosfetGatePin, HIGH);
+    Serial.printf("Closed door.");
   }
 }
 
 BLYNK_WRITE(V3) {  // indicator button in ui to show current ringing-state
-  isRinging = param.asInt();
+  isRinging = param.asInt();  
   serial.printf("isRinging is now %d", isRinging);
 }
 
@@ -115,13 +117,11 @@ void openDoorForGivenMs(unsigned int timeToOpenInMs) {
 void ringSensorThreadFunction(void* param) {
   while (true) {
     if (digitalRead(microphoneAdcPin) == HIGH) {
-      isRinging = true;
       Blynk.virtualWrite(V3, 1);
       if (autoOpenDoorOnRing == 1) {
         Blynk.digitalWrite(V1, 1);
       }
       delay(entranceBellDuration);
-      isRinging = false;
       Blynk.virtualWrite(V3, 0);
     }
     delay(100);  // Cycle pause between each check
@@ -132,13 +132,13 @@ int percentToValue(int percent, int maxValue) { return 0 <= percent <= 100 ? rou
 
 // Connection Handler Functions
 
-void WaitForWifi(uint cycleDelayInMilliSeconds) {
+void WaitForWifiConnection(uint cycleDelayInMilliSeconds) {
   while (WiFi.status() != WL_CONNECTED) {
     delay(cycleDelayInMilliSeconds);
   }
 }
 
-void WaitForBlynk(int cycleDelayInMilliSeconds) {
+void WaitForBlynkConnection(int cycleDelayInMilliSeconds) {
   while (!Blynk.connected()) {
     delay(cycleDelayInMilliSeconds);
   }
