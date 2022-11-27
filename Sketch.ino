@@ -9,8 +9,8 @@
 #include <math.h>
 
 // GPIO pins
-const unsigned short int microphoneAdcPin = 19;
-const unsigned short int openerMosfetGatePin = 16;
+const unsigned short int microphoneAdcPin = 19;     // TODO: assign correct pin
+const unsigned short int openerMosfetGatePin = 16;  // TODO: assign correct pin
 
 // Limits
 const unsigned int wifiHandlerThreadStackSize = 10000;
@@ -72,14 +72,20 @@ BLYNK_CONNECTED() {  // Update client pin states to server-states
 
 BLYNK_WRITE(V1) {  // Open door for X seconds on ui button push
   int pinValue = param.asInt();
-  Serial.printf("Opening door now for 10000 ms");
-  openDoorForGivenMs(10000);
-  Blynk.virtualWrite(V1, 0);
+  if (pinValue == 1) {
+    Serial.printf("Opening door now for 10000 ms");
+    openDoorForGivenMs(10000);
+    Blynk.virtualWrite(V1, 0);
+  }
 }
 
-BLYNK_WRITE(V2) {  // open door, as long as the ui button is held
+BLYNK_WRITE(V2) {  // open door, as long as the switch is on
   int pinValue = param.asInt();
-  // TODO
+  if (pinValue == 0) {
+    digitalWrite(openerMosfetGatePin, LOW);
+  } else {
+    digitalWrite(openerMosfetGatePin, HIGH);
+  }
 }
 
 BLYNK_WRITE(V3) {  // indicator button in ui to show current ringing-state
