@@ -3,14 +3,13 @@
 #include "./Configuration/Wifi.h"
 
 // Libraries
-#include <BlynkSimpleEsp32.h>  // Part of Blynk by Volodymyr Shymanskyy
-#include <WiFi.h>              // Part of WiFi Built-In by Arduino
-#include <WiFiClient.h>        // Part of WiFi Built-In by Arduino
+#include <BlynkSimpleEsp32.h>
+#include <WiFi.h>
 #include <math.h>
 
 // GPIO pins
-const unsigned short int microphoneAdcPin = 19;     // TODO: assign correct pin
-const unsigned short int openerMosfetGatePin = 16;  // TODO: assign correct pin
+const unsigned short int microphoneAdcPin = 33;
+const unsigned short int openerMosfetGatePin = 21;
 
 // Limits
 const unsigned int wifiHandlerThreadStackSize = 10000;
@@ -23,7 +22,7 @@ const unsigned int blynkConnectionTimeout = 10000;
 const unsigned int blynkConnectionStabilizerTimeout = 5000;
 const unsigned short cycleDelayInMilliSeconds = 100;
 
-// Measured Times
+// Time constants
 const unsigned int cycleTimeInMs = 2000;          // time one cycle should take (door opens for x seconds after releasing the button)
 const unsigned int openTimeInMs = 1000;           // duration, the button should be pressed and held for, then released after openTimeInMs passed
 const unsigned int entranceBellDuration = 3000;   // Duration of the entrance bell is audible
@@ -37,6 +36,9 @@ TaskHandle_t ringSensorThreadFunctionHandle;
 // Global State
 int isRinging;           // 0 = false, 1 = true
 int autoOpenDoorOnRing;  // 0 = false, 1 = true
+
+// Counters
+unsigned int wifiReconnectCounter = 0;
 
 // ----------------------------------------------------------------------------
 // SETUP
@@ -91,13 +93,13 @@ BLYNK_WRITE(V2) {  // open door, as long as the switch is on
 }
 
 BLYNK_WRITE(V3) {  // indicator button in ui to show current ringing-state
-  isRinging = param.asInt();  
-  serial.printf("isRinging is now %d", isRinging);
+  isRinging = param.asInt();
+  Serial.printf("isRinging is now %d", isRinging);
 }
 
 BLYNK_WRITE(V4) {  // switch to enable / disable auto-open function
   autoOpenDoorOnRing = param.asInt();
-  serial.printf("autoOpenDoorOnRing is now %d", autoOpenDoorOnRing);
+  Serial.printf("autoOpenDoorOnRing is now %d", autoOpenDoorOnRing);
 }
 
 // General functions
@@ -119,7 +121,7 @@ void ringSensorThreadFunction(void* param) {
     if (digitalRead(microphoneAdcPin) == HIGH) {
       Blynk.virtualWrite(V3, 1);
       if (autoOpenDoorOnRing == 1) {
-        Blynk.digitalWrite(V1, 1);
+        Blynk.virtualWrite(V1, 1);
       }
       delay(entranceBellDuration);
       Blynk.virtualWrite(V3, 0);
@@ -166,7 +168,6 @@ void wifiConnectionHandlerThreadFunction(void* params) {
       if (WiFi.isConnected()) {
         Serial.printf("Connected to Wifi: %s\n", WIFI_SSID);
         wifiReconnectCounter = 0;
-        flashLights(2, 50, 50);
       }
     }
     delay(1000);
