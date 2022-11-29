@@ -86,15 +86,17 @@ BLYNK_WRITE(V2) {  // open door, as long as the switch is on
   if (pinValue == 0) {
     digitalWrite(openerMosfetGatePin, LOW);
     Serial.printf("Opening door...");
+    Blynk.notify("Opening door...");
   } else {
     digitalWrite(openerMosfetGatePin, HIGH);
-    Serial.printf("Closed door.");
+    Serial.printf("Stopped opening door.");
   }
 }
 
 BLYNK_WRITE(V3) {  // indicator button in ui to show current ringing-state
   isRinging = param.asInt();
   Serial.printf("isRinging is now %d", isRinging);
+  Blynk.notify("Door is ringing.");
 }
 
 BLYNK_WRITE(V4) {  // switch to enable / disable auto-open function
