@@ -8,41 +8,41 @@
 #include <math.h>
 
 // GPIO pins
-const unsigned short int microphoneAdcPin = 33;
-const unsigned short int openerMosfetGatePin = 21;
+const ushort microphoneAdcPin = 33;
+const ushort openerMosfetGatePin = 21;
 
 // Limits
-const unsigned int wifiHandlerThreadStackSize = 10000;
-const unsigned int blynkHandlerThreadStackSize = 10000;
-const unsigned int ringSensorThreadStackSize = 10000;
+const uint wifiHandlerThreadStackSize = 5000;
+const uint blynkHandlerThreadStackSize = 10000;
+const uint ringSensorThreadStackSize = 5000;
+const uint doorOpenerThreadStackSize = 5000;
+const uint wifiReconnectCountLimit = 5;  // Wifi connection attempts. If count is reached, esp32 will reboot
 
 // Timeouts
-const unsigned int wifiConnectionTimeout = 10000;
-const unsigned int blynkConnectionTimeout = 10000;
-const unsigned int blynkConnectionStabilizerTimeout = 5000;
-const unsigned short cycleDelayInMilliSeconds = 100;
+const uint wifiConnectionTimeout = 10000;
+const uint blynkConnectionTimeout = 10000;
+const uint blynkConnectionStabilizerTimeout = 5000;
+const ushort cycleDelayInMilliSeconds = 100;
 
 // Time constants
-const unsigned int cycleTimeInMs = 2000;          // time one cycle should take (door opens for x seconds after releasing the button)
-const unsigned int openTimeInMs = 1000;           // duration, the button should be pressed and held for, then released after openTimeInMs passed
-const unsigned int entranceBellDuration = 3000;   // Duration of the entrance bell is audible
-const unsigned int frontDoorBellDuration = 3000;  // Duration of the front door bell is audible
+const uint cycleTimeInMs = 2000;          // time one cycle should take (door opens for x seconds after releasing the button)
+const uint openTimeInMs = 1000;           // duration, the button should be pressed and held for, then released after openTimeInMs passed
+const uint entranceBellDuration = 3000;   // Duration of the entrance bell is audible
+const uint frontDoorBellDuration = 3000;  // Duration of the front door bell is audible
 
 // Task Handles
 TaskHandle_t wifiConnectionHandlerThreadFunctionHandle;
 TaskHandle_t blynkConnectionHandlerThreadFunctionHandle;
 TaskHandle_t ringSensorThreadFunctionHandle;
+TaskHandle_t doorOpenerThreadFunctionHandle;
 
 // Global State
-int isRinging;           // 0 = false, 1 = true
-int autoOpenDoorOnRing;  // 0 = false, 1 = true
+uint isRinging = 0;           // 0 = false, 1 = true
+uint openDoor = 0;            // 0 = false, 1 = true
+uint autoOpenDoorOnRing = 0;  // 0 = false, 1 = true
 
 // Counters
-unsigned int wifiReconnectCounter = 0;
-
-// ----------------------------------------------------------------------------
-// SETUP
-// ----------------------------------------------------------------------------
+uint wifiReconnectCounter = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -54,19 +54,10 @@ void setup() {
   xTaskCreatePinnedToCore(blynkConnectionHandlerThreadFunction, "Blynk Connection Handling Thread", blynkHandlerThreadStackSize, NULL, 20, &blynkConnectionHandlerThreadFunctionHandle, 1);
 
   xTaskCreatePinnedToCore(ringSensorThreadFunction, "Ring Sensor Thread", ringSensorThreadStackSize, NULL, 20, &ringSensorThreadFunctionHandle, 1);
+  xTaskCreatePinnedToCore(doorOpenerThreadFunction, "Door Opener Thread", doorOpenerThreadStackSize, NULL, 20, &doorOpenerThreadFunctionHandle, 1);
 }
 
-// ----------------------------------------------------------------------------
-// MAIN LOOP
-// ----------------------------------------------------------------------------
-
 void loop() { Blynk.run(); }
-
-// ----------------------------------------------------------------------------
-// FUNCTIONS
-// ----------------------------------------------------------------------------
-
-// Blynk Functions
 
 BLYNK_CONNECTED() {  // Update client pin states to server-states
   Blynk.syncAll();
@@ -74,67 +65,65 @@ BLYNK_CONNECTED() {  // Update client pin states to server-states
 
 BLYNK_WRITE(V1) {  // Open door for X seconds on ui button push
   int pinValue = param.asInt();
+  Serial.printf("Virtual Pin V1 triggerd to: %d\n", pinValue);
   if (pinValue == 1) {
-    Serial.printf("Opening door now for 10000 ms");
-    openDoorForGivenMs(10000);
-    Blynk.virtualWrite(V1, 0);
+    openDoor = 1;
+    delay(10000);  // open door for 10 seconds
+    openDoor = 0;
   }
 }
 
 BLYNK_WRITE(V2) {  // open door, as long as the switch is on
   int pinValue = param.asInt();
   if (pinValue == 0) {
-    digitalWrite(openerMosfetGatePin, LOW);
-    Serial.printf("Opening door...");
-    Blynk.notify("Opening door...");
+    openDoor = 0;
   } else {
-    digitalWrite(openerMosfetGatePin, HIGH);
-    Serial.printf("Stopped opening door.");
+    openDoor = 1;
   }
 }
 
 BLYNK_WRITE(V3) {  // indicator button in ui to show current ringing-state
-  isRinging = param.asInt();
-  Serial.printf("isRinging is now %d", isRinging);
-  Blynk.notify("Door is ringing.");
+  Serial.printf("isRinging is now %d\n", isRinging);
 }
 
 BLYNK_WRITE(V4) {  // switch to enable / disable auto-open function
   autoOpenDoorOnRing = param.asInt();
-  Serial.printf("autoOpenDoorOnRing is now %d", autoOpenDoorOnRing);
+  Serial.printf("autoOpenDoorOnRing is now %d\n", autoOpenDoorOnRing);
 }
 
-// General functions
-
-void openDoorForGivenMs(unsigned int timeToOpenInMs) {
-  unsigned int timePassed = 0;
-
-  while (timePassed <= timeToOpenInMs) {
-    digitalWrite(openerMosfetGatePin, HIGH);
-    delay(openTimeInMs);
-    digitalWrite(openerMosfetGatePin, LOW);
-    delay(cycleTimeInMs - openTimeInMs);
-    timePassed += cycleTimeInMs;
-  }
-}
-
-void ringSensorThreadFunction(void* param) {
+void ringSensorThreadFunction(void* params) {
   while (true) {
-    if (digitalRead(microphoneAdcPin) == HIGH) {
+    if (digitalRead(microphoneAdcPin) == LOW) {
       Blynk.virtualWrite(V3, 1);
       if (autoOpenDoorOnRing == 1) {
-        Blynk.virtualWrite(V1, 1);
+        openDoor = 1;
       }
-      delay(entranceBellDuration);
+      delay(10000);  // 10s
+      if (autoOpenDoorOnRing == 1) {
+        openDoor = 0;
+      }
       Blynk.virtualWrite(V3, 0);
     }
-    delay(100);  // Cycle pause between each check
+    delay(10);  // Cycle pause between each check
   }
 }
 
-int percentToValue(int percent, int maxValue) { return 0 <= percent <= 100 ? round((maxValue / 100) * percent) : 1023; }
-
-// Connection Handler Functions
+void doorOpenerThreadFunction(void* params) {
+  while (true) {
+    if (openDoor == 1) {
+      while (openDoor == 1) {
+        Serial.printf("Opening door...\n");
+        digitalWrite(openerMosfetGatePin, HIGH);
+        delay(openTimeInMs);
+        digitalWrite(openerMosfetGatePin, LOW);
+        delay(cycleTimeInMs - openTimeInMs);
+      }
+      digitalWrite(openerMosfetGatePin, LOW);
+      Serial.printf("Stopped opening door.\n");
+    }
+    delay(100);
+  }
+}
 
 void WaitForWifiConnection(uint cycleDelayInMilliSeconds) {
   while (WiFi.status() != WL_CONNECTED) {
@@ -142,7 +131,7 @@ void WaitForWifiConnection(uint cycleDelayInMilliSeconds) {
   }
 }
 
-void WaitForBlynkConnection(int cycleDelayInMilliSeconds) {
+void WaitForBlynkConnection(uint cycleDelayInMilliSeconds) {
   while (!Blynk.connected()) {
     delay(cycleDelayInMilliSeconds);
   }
@@ -154,13 +143,15 @@ void wifiConnectionHandlerThreadFunction(void* params) {
     if (!WiFi.isConnected()) {
       try {
         Serial.printf("Connecting to Wifi: %s\n", WIFI_SSID);
-        WiFi.begin(WIFI_SSID, WIFI_PW);  // initial begin as workaround to some espressif library bug
-        WiFi.disconnect();
+        WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PW);
-        WiFi.setHostname("Desklight (ESP32, Blynk)");
+        WiFi.setHostname("Doorbell (ESP32, Blynk)");
         time = 0;
-        while (WiFi.status() != WL_CONNECTED) {
-          if (time >= wifiConnectionTimeout || WiFi.isConnected()) break;
+        while (!WiFi.isConnected()) {
+          if (time >= wifiConnectionTimeout) {
+            wifiReconnectCounter++;
+            break;
+          }
           delay(cycleDelayInMilliSeconds);
           time += cycleDelayInMilliSeconds;
         }
@@ -171,10 +162,14 @@ void wifiConnectionHandlerThreadFunction(void* params) {
         Serial.printf("Connected to Wifi: %s\n", WIFI_SSID);
         wifiReconnectCounter = 0;
       }
+      if (wifiReconnectCounter >= wifiReconnectCountLimit) {
+        Serial.printf("Restarting esp, since wifi reconnect count reached limit of %d\n", wifiReconnectCountLimit);
+        ESP.restart();
+      }
     }
     delay(1000);
-    Serial.printf("Wifi Connection Handler Thread current stack size: %d , current Time: %d\n", wifiHandlerThreadStackSize - uxTaskGetStackHighWaterMark(NULL), xTaskGetTickCount());
-  };
+    // Serial.printf("Wifi Connection Handler Thread current stack size: %d , current Time: %d\n", wifiHandlerThreadStackSize - uxTaskGetStackHighWaterMark(NULL), xTaskGetTickCount());
+  }
 }
 
 void blynkConnectionHandlerThreadFunction(void* params) {
@@ -199,6 +194,6 @@ void blynkConnectionHandlerThreadFunction(void* params) {
       }
     }
     delay(1000);
-    Serial.printf("Blynk Connection Handler Thread current stack size: %d , current Time: %d\n", blynkHandlerThreadStackSize - uxTaskGetStackHighWaterMark(NULL), xTaskGetTickCount());
+    // Serial.printf("Blynk Connection Handler Thread current stack size: %d , current Time: %d\n", blynkHandlerThreadStackSize - uxTaskGetStackHighWaterMark(NULL), xTaskGetTickCount());
   }
 }

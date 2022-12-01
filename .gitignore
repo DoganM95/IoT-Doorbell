@@ -3,6 +3,8 @@
 **/Credentials/*
 **/Configuration/*
 
+**/build
+
 !***_example.h
 
 **/*.bkp
