@@ -84,6 +84,9 @@ BLYNK_WRITE(V2) {  // open door, as long as the switch is on
 
 BLYNK_WRITE(V3) {  // indicator button in ui to show current ringing-state
   Serial.printf("isRinging is now %d\n", isRinging);
+  if (isRinging == 0) {
+    Blynk.virtualWrite(V3, 0);
+  }
 }
 
 BLYNK_WRITE(V4) {  // switch to enable / disable auto-open function
