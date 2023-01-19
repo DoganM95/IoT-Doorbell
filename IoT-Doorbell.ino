@@ -3,6 +3,7 @@
 #include "./Configuration/Wifi.h"
 
 // Libraries
+#include <Arduino.h>
 #include <BlynkSimpleEsp32.h>
 #include <WiFi.h>
 #include <math.h>
@@ -17,6 +18,7 @@ const uint blynkHandlerThreadStackSize = 10000;
 const uint ringSensorThreadStackSize = 5000;
 const uint doorOpenerThreadStackSize = 5000;
 const uint wifiReconnectCountLimit = 5;  // Wifi connection attempts. If count is reached, esp32 will reboot
+const uint blynkReconnectCountLimit = 10;
 
 // Timeouts
 const uint wifiConnectionTimeout = 10000;
@@ -25,8 +27,8 @@ const uint blynkConnectionStabilizerTimeout = 5000;
 const ushort cycleDelayInMilliSeconds = 100;
 
 // Time constants
-const uint cycleTimeInMs = 2000;          // time one cycle should take (door opens for x seconds after releasing the button)
-const uint openTimeInMs = 1000;           // duration, the button should be pressed and held for, then released after openTimeInMs passed
+uint cycleTimeInMs = 2000;                // time one cycle should take (door opens for x seconds after releasing the button)
+uint openTimeInMs = 1000;                 // duration, the button should be pressed and held for, then released after openTimeInMs passed
 const uint entranceBellDuration = 3000;   // Duration of the entrance bell is audible
 const uint frontDoorBellDuration = 3000;  // Duration of the front door bell is audible
 
@@ -39,10 +41,11 @@ TaskHandle_t doorOpenerThreadFunctionHandle;
 // Global State
 uint isRinging = 0;           // 0 = false, 1 = true
 uint openDoor = 0;            // 0 = false, 1 = true
-uint autoOpenDoorOnRing = 0;  // 0 = false, 1 = true
+uint autoOpenDoorOnRing = 1;  // 0 = false, 1 = true
 
 // Counters
 uint wifiReconnectCounter = 0;
+uint blynkReconnectCounter = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -94,20 +97,29 @@ BLYNK_WRITE(V4) {  // switch to enable / disable auto-open function
   Serial.printf("autoOpenDoorOnRing is now %d\n", autoOpenDoorOnRing);
 }
 
+BLYNK_WRITE(V5) {
+  openTimeInMs = param.asInt();
+  Serial.printf("Open Time is now %d ms\n", openTimeInMs);
+}
+
+BLYNK_WRITE(V6) {
+  cycleTimeInMs = param.asInt();
+  Serial.printf("Open Cycle Time is now %d ms\n", cycleTimeInMs);
+}
+
 void ringSensorThreadFunction(void* params) {
   while (true) {
     if (digitalRead(microphoneAdcPin) == LOW) {
+      Blynk.notify("Doorbell rang.\n");
       Blynk.virtualWrite(V3, 1);
       if (autoOpenDoorOnRing == 1) {
         openDoor = 1;
-      }
-      delay(10000);  // 10s
-      if (autoOpenDoorOnRing == 1) {
+        delay(9000);  // 9s
         openDoor = 0;
       }
       Blynk.virtualWrite(V3, 0);
     }
-    delay(10);  // Cycle pause between each check
+    delay(10);  // sleep time between each check, you know, to let the microcontroller relax a bit
   }
 }
 
@@ -117,9 +129,10 @@ void doorOpenerThreadFunction(void* params) {
       while (openDoor == 1) {
         Serial.printf("Opening door...\n");
         digitalWrite(openerMosfetGatePin, HIGH);
-        delay(openTimeInMs);
+        delay(openTimeInMs);  // duration of "opener button being pressed"
+        Serial.printf("Releasing\n");
         digitalWrite(openerMosfetGatePin, LOW);
-        delay(cycleTimeInMs - openTimeInMs);
+        delay(cycleTimeInMs - openTimeInMs);  // duration of "opener button release"
       }
       digitalWrite(openerMosfetGatePin, LOW);
       Serial.printf("Stopped opening door.\n");
@@ -177,15 +190,18 @@ void wifiConnectionHandlerThreadFunction(void* params) {
 
 void blynkConnectionHandlerThreadFunction(void* params) {
   uint time;
+  bool blynkConnectionSuccess;
   while (true) {
     if (!Blynk.connected()) {
+      WaitForWifiConnection(100);
       Serial.printf("Connecting to Blynk: %s\n", BLYNK_USE_LOCAL_SERVER == true ? BLYNK_SERVER : "Blynk Cloud Server");
       if (BLYNK_USE_LOCAL_SERVER)
         Blynk.config(BLYNK_AUTH, BLYNK_SERVER, BLYNK_PORT);
       else
         Blynk.config(BLYNK_AUTH);
-      Blynk.connect();  // Connects using the chosen Blynk.config
-      uint time = 0;
+      Blynk.connect(blynkConnectionTimeout);  // Connects using the chosen Blynk.config
+      blynkReconnectCounter++;
+      time = 0;
       while (!Blynk.connected()) {
         if (time >= blynkConnectionTimeout || Blynk.connected()) break;
         delay(cycleDelayInMilliSeconds);
@@ -193,10 +209,15 @@ void blynkConnectionHandlerThreadFunction(void* params) {
       }
       if (Blynk.connected()) {
         Serial.printf("Connected to Blynk: %s\n", BLYNK_USE_LOCAL_SERVER ? BLYNK_SERVER : "Blynk Cloud Server");
+        blynkReconnectCounter = 0;
         delay(blynkConnectionStabilizerTimeout);
+      }
+      if (blynkReconnectCounter >= blynkReconnectCountLimit) {
+        Serial.printf("Restarting esp, since blynk reconnect count reached limit of %d\n", blynkReconnectCountLimit);
+        ESP.restart();
       }
     }
     delay(1000);
-    // Serial.printf("Blynk Connection Handler Thread current stack size: %d , current Time: %d\n", blynkHandlerThreadStackSize - uxTaskGetStackHighWaterMark(NULL), xTaskGetTickCount());
+    Serial.printf("Blynk Connection Handler Thread current stack size: %d , current Time: %d\n", blynkHandlerThreadStackSize - uxTaskGetStackHighWaterMark(NULL), xTaskGetTickCount());
   }
 }
