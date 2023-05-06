@@ -47,6 +47,11 @@ uint autoOpenDoorOnRing = 1;  // 0 = false, 1 = true
 uint wifiReconnectCounter = 0;
 uint blynkReconnectCounter = 0;
 
+void blynkConnectionHandlerThreadFunction(void* params);
+void wifiConnectionHandlerThreadFunction(void* params);
+void doorOpenerThreadFunction(void* params);
+void ringSensorThreadFunction(void* params);
+
 void setup() {
   Serial.begin(115200);
 
@@ -78,11 +83,7 @@ BLYNK_WRITE(V1) {  // Open door for X seconds on ui button push
 
 BLYNK_WRITE(V2) {  // open door, as long as the switch is on
   int pinValue = param.asInt();
-  if (pinValue == 0) {
-    openDoor = 0;
-  } else {
-    openDoor = 1;
-  }
+  openDoor = pinValue == 0 ? 0 : 1;  // anything not zero == open
 }
 
 BLYNK_WRITE(V3) {  // indicator button in ui to show current ringing-state
@@ -114,7 +115,7 @@ void ringSensorThreadFunction(void* params) {
       Blynk.virtualWrite(V3, 1);
       if (autoOpenDoorOnRing == 1) {
         openDoor = 1;
-        delay(9000);  // 9s
+        delay(cycleTimeInMs * 3);
         openDoor = 0;
       }
       Blynk.virtualWrite(V3, 0);
@@ -126,8 +127,9 @@ void ringSensorThreadFunction(void* params) {
 void doorOpenerThreadFunction(void* params) {
   while (true) {
     if (openDoor == 1) {
+      Serial.printf("Opening door...\n");
       while (openDoor == 1) {
-        Serial.printf("Opening door...\n");
+        Serial.printf("Pressing\n");
         digitalWrite(openerMosfetGatePin, HIGH);
         delay(openTimeInMs);  // duration of "opener button being pressed"
         Serial.printf("Releasing\n");

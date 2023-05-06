@@ -1,0 +1,14 @@
+.vscode
+
+**/Credentials/*
+**/Configuration/*
+
+**/build
+
+!***_example.h
+
+**/*.bkp
+**/*.log
+
+desktop.ini
+folderico-github.ico
